@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 #include <ion/ion.h>
+#include <ion/IONmem.h>
 #include <linux/ion.h>
 
 size_t len = 1024*1024, align = 0;
@@ -38,15 +39,35 @@ int heap_mask = 1;
 int test = -1;
 size_t stride;
 
+int _CMEM_alloc_test(void)
+{
+    int ret;
+    IONMEM_AllocParams params;
+
+    CMEM_init();
+    ret = CMEM_alloc(len, &params, alloc_flags);
+    if (ret)
+        printf("%s failed: %s\n", __func__, strerror(ret));
+    else
+        printf("%s: passed\n", __func__);
+    return ret;
+}
+
 int _ion_alloc_test(int *fd, ion_user_handle_t *handle)
 {
     int ret;
+    int legacy_ion = 0;
 
     *fd = ion_open();
     if (*fd < 0)
         return *fd;
 
-    ret = ion_alloc(*fd, len, align, heap_mask, alloc_flags, handle);
+    legacy_ion = ion_is_legacy(*fd);
+    printf("legacy_ion=%d\n", legacy_ion);
+    if (legacy_ion)
+        ret = ion_alloc(*fd, len, align, heap_mask, alloc_flags, handle);
+    else
+        ret = ion_alloc_fd(*fd, len, align, heap_mask, alloc_flags, handle);
 
     if (ret)
         printf("%s failed: %s\n", __func__, strerror(ret));
@@ -55,13 +76,14 @@ int _ion_alloc_test(int *fd, ion_user_handle_t *handle)
 
 void ion_alloc_test()
 {
-    int fd, ret;
+    int fd, ret = 0;
     ion_user_handle_t handle;
 
     if (_ion_alloc_test(&fd, &handle))
         return;
 
-    ret = ion_free(fd, handle);
+    if (ion_is_legacy(fd))
+        ret = ion_free(fd, handle);
     if (ret) {
         printf("%s failed: %s %d\n", __func__, strerror(ret), handle);
         return;
@@ -213,11 +235,12 @@ void ion_share_test()
 int main(int argc, char* argv[]) {
     int c;
     enum tests {
-        ALLOC_TEST = 0, MAP_TEST, SHARE_TEST,
+        ALLOC_TEST = 0, MAP_TEST, SHARE_TEST, CMEM_TEST,
     };
 
     while (1) {
         static struct option opts[] = {
+            {"CMEM_alloc", no_argument, 0, 'c'},
             {"alloc", no_argument, 0, 'a'},
             {"alloc_flags", required_argument, 0, 'f'},
             {"heap_mask", required_argument, 0, 'h'},
@@ -229,7 +252,7 @@ int main(int argc, char* argv[]) {
             {"prot", required_argument, 0, 'p'},
         };
         int i = 0;
-        c = getopt_long(argc, argv, "af:h:l:mr:st", opts, &i);
+        c = getopt_long(argc, argv, "caf:h:l:mr:st", opts, &i);
         if (c == -1)
             break;
 
@@ -267,6 +290,9 @@ int main(int argc, char* argv[]) {
         case 's':
             test = SHARE_TEST;
             break;
+        case 'c':
+            test = CMEM_TEST;
+            break;
         }
     }
     printf("test %d, len %zu, align %zu, map_flags %d, prot %d, heap_mask %d,"
@@ -281,6 +307,9 @@ int main(int argc, char* argv[]) {
             break;
         case SHARE_TEST:
             ion_share_test();
+            break;
+        case CMEM_TEST:
+            _CMEM_alloc_test();
             break;
         default:
             printf("must specify a test (alloc, map, share)\n");
