@@ -120,9 +120,7 @@ int CMEM_alloc_fd(size_t size, IONMEM_AllocParams *params, unsigned int flag, un
         __E("query_heap_cnt fail! no ion heaps for alloc!!!\n");
     }
     if (ret < 0) {
-        ion_close(cmem_fd);
         __E("ion_alloc failed, errno=%d\n", errno);
-        cmem_fd = -1;
         return -ENOMEM;
     }
     return ret;
@@ -158,9 +156,7 @@ unsigned long CMEM_alloc(size_t size, IONMEM_AllocParams *params, bool cache_fla
         else
             ret = CMEM_alloc_fd(size, params, flag, ION_HEAP_TYPE_CUSTOM);
         if (ret < 0) {
-            ion_close(cmem_fd);
             __E("ion_alloc failed, errno=%d\n", errno);
-            cmem_fd = -1;
             return -ENOMEM;
         }
     } else {
@@ -171,8 +167,6 @@ unsigned long CMEM_alloc(size_t size, IONMEM_AllocParams *params, bool cache_fla
         if (ret < 0) {
             __E("ion_share failed, errno=%d\n", errno);
             ion_free(cmem_fd, params->mIonHnd);
-            ion_close(cmem_fd);
-            cmem_fd = -1;
             return -EINVAL;
         }
         ion_free(cmem_fd, params->mIonHnd);
