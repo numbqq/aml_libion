@@ -44,18 +44,65 @@
 enum ion_version { ION_VERSION_UNKNOWN, ION_VERSION_MODERN, ION_VERSION_LEGACY };
 
 static atomic_int g_ion_version = ATOMIC_VAR_INIT(ION_VERSION_UNKNOWN);
+#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
+#define VERSION_FILE "/proc/version"
+
+static int get_kernel_version(void)
+{
+    char *version_str[128];
+    int ret = -1;
+    int fd, version, patchlevel, sublevel;
+
+    fd = open(VERSION_FILE, O_RDONLY);
+    if (fd < 0) {
+        ALOGE("%s open failed\n", VERSION_FILE);
+        return -1;
+    }
+    ret = read(fd, version_str, 128);
+    if (ret < 0) {
+        ALOGE("%s read failed\n", VERSION_FILE);
+        return -1;
+    }
+
+    close(fd);
+
+    ret = sscanf((const char *)version_str,
+                    "Linux version %d.%d.%d", &version,
+                    &patchlevel, &sublevel);
+    if (ret != 3) {
+        ALOGE("sscanf error\n");
+        return -1;
+    }
+
+    return KERNEL_VERSION(version, patchlevel, sublevel);
+}
 
 int ion_is_legacy(int fd) {
     int version = atomic_load_explicit(&g_ion_version, memory_order_acquire);
+    int kernel_version;
+
     if (version == ION_VERSION_UNKNOWN) {
-        /**
-          * Check for FREE IOCTL here; it is available only in the old
-          * kernels, not the new ones.
-          */
-        int err = ion_free(fd, (ion_user_handle_t)NULL);
-        version = (err == -ENOTTY) ? ION_VERSION_MODERN : ION_VERSION_LEGACY;
+        kernel_version = get_kernel_version();
+        if (kernel_version < 0) {
+            /**
+              * Check for FREE IOCTL here; it is available only in the old
+              * kernels, not the new ones.
+              */
+            struct ion_handle_data data = {
+                .handle = 0,
+            };
+            int err = ioctl(fd, ION_IOC_FREE, &data);
+            if (err < 0)
+               err = -errno;
+            version = (err == -ENOTTY) ?
+                            ION_VERSION_MODERN : ION_VERSION_LEGACY;
+        } else {
+            version = (kernel_version >= KERNEL_VERSION(4, 12, 0)) ?
+                                    ION_VERSION_MODERN : ION_VERSION_LEGACY;
+        }
         atomic_store_explicit(&g_ion_version, version, memory_order_release);
     }
+
     return version == ION_VERSION_LEGACY;
 }
 

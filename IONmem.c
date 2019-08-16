@@ -8,6 +8,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -21,83 +22,39 @@
 #include <linux/ion.h>
 #include "ion_4.12.h"
 
-static int cmem_fd = -2;
-static int ref_count = 0;
-
 #ifdef __DEBUG
-#define __D(fmt, args...) printf("CMEM Debug: " fmt, ## args)
+#define __D(fmt, args...) printf("ionmem debug: " fmt, ## args)
 #else
 #define __D(fmt, args...)
 #endif
 
-#define __E(fmt, args...) printf("CMEM Error: " fmt, ## args)
+#define __E(fmt, args...) printf("ionmem error: " fmt, ## args)
 
-static int validate_init()
+int ion_mem_init(void)
 {
-    switch (cmem_fd) {
-      case -3:
-        __E("CMEM_exit() already called, check stderr output for earlier "
-            "CMEM failure messages (possibly version mismatch).\n");
+    int ion_fd = -1;
+    ion_fd = ion_open();
 
-        return 0;
-
-      case -2:
-        __E("CMEM_init() not called, you must initialize CMEM before "
-            "making API calls.\n");
-
-        return 0;
-
-      case -1:
-        __E("CMEM file descriptor -1 (failed 'open()'), ensure CMEMK "
-            "kernel module cmemk.ko has been installed with 'insmod'");
-
-        return 0;
-
-      default:
-        return 1;
-    }
-}
-
-int CMEM_init(void)
-{
-    int flags;
-
-    __D("init: entered - ref_count %d, cmem_fd %d\n", ref_count, cmem_fd);
-
-    if (cmem_fd >= 0) {
-        ref_count++;
-        __D("init: /dev/ion already opened, incremented ref_count %d\n",
-            ref_count);
-        return 0;
-    }
-
-    cmem_fd = ion_open();
-
-    if (cmem_fd < 0) {
-        __E("init: Failed to open /dev/ion: '%s'\n", strerror(errno));
+    if (ion_fd < 0) {
+        __E("%s failed: '%s'\n", strerror(errno));
         return -1;
     }
+    __D("%s, ion_fd=%d\n", __func__, ion_fd);
 
-    ref_count++;
-
-    __D("init: successfully opened /dev/ion...\n");
-
-    __D("init: fd=%d\n", cmem_fd);
-
-    return 0;
+    return ion_fd;
 }
 
-int CMEM_alloc_fd(size_t size, IONMEM_AllocParams *params, unsigned int flag, unsigned int alloc_hmask)
+int ion_mem_alloc_fd(int ion_fd, size_t size, IONMEM_AllocParams *params, unsigned int flag, unsigned int alloc_hmask)
 {
     int ret = -1;
     int i = 0, num_heaps = 0;
     unsigned int heap_mask = 0;
 
-    if (ion_query_heap_cnt(cmem_fd, &num_heaps) >= 0) {
+    if (ion_query_heap_cnt(ion_fd, &num_heaps) >= 0) {
         __D("num_heaps=%d\n", num_heaps);
         struct ion_heap_data *const heaps = (struct ion_heap_data *)malloc(num_heaps * sizeof(struct ion_heap_data));
         if (heaps != NULL && num_heaps) {
-            if (ion_query_get_heaps(cmem_fd, num_heaps, heaps) >= 0) {
+            if (ion_query_get_heaps(ion_fd, num_heaps, heaps) >= 0) {
                 for (int i = 0; i != num_heaps; ++i) {
                     __D("heaps[%d].type=%d, heap_id=%d\n", i, heaps[i].type, heaps[i].heap_id);
                     if ((1 << heaps[i].type) == alloc_hmask) {
@@ -110,7 +67,7 @@ int CMEM_alloc_fd(size_t size, IONMEM_AllocParams *params, unsigned int flag, un
             }
             free(heaps);
             if (heap_mask)
-                ret = ion_alloc_fd(cmem_fd, size, 0, heap_mask, flag, &params->mImageFd);
+                ret = ion_alloc_fd(ion_fd, size, 0, heap_mask, flag, &params->mImageFd);
             else
                 __E("don't find match heap!!\n");
         } else {
@@ -126,115 +83,90 @@ int CMEM_alloc_fd(size_t size, IONMEM_AllocParams *params, unsigned int flag, un
     return ret;
 }
 
-unsigned long CMEM_alloc(size_t size, IONMEM_AllocParams *params, bool cache_flag)
+unsigned long ion_mem_alloc(int ion_fd, size_t size, IONMEM_AllocParams *params, bool cache_flag)
 {
     int ret = -1;
     int legacy_ion = 0;
     unsigned flag = 0;
 
-    legacy_ion = ion_is_legacy(cmem_fd);
-    if (!validate_init()) {
-        return 0;
-    }
+    legacy_ion = ion_is_legacy(ion_fd);
+
     if (cache_flag) {
         flag = ION_FLAG_CACHED | ION_FLAG_CACHED_NEEDS_SYNC;
     }
-    __D("CMEM_alloc, cache=%d, bytes=%d, legacy_ion=%d, flag=0x%x\n", cache_flag, size, legacy_ion, flag);
-    if (legacy_ion == 1)
-        ret = ion_alloc(cmem_fd, size, 0, ION_HEAP_TYPE_DMA_MASK, flag, &params->mIonHnd);
-    else
-        ret = CMEM_alloc_fd(size, params, flag, ION_HEAP_TYPE_DMA_MASK);
-    if (ret < 0) {
-        if (legacy_ion)
-            ret = ion_alloc(cmem_fd, size, 0, ION_HEAP_CARVEOUT_MASK, flag, &params->mIonHnd);
-        else
-            ret = CMEM_alloc_fd(size, params, flag, ION_HEAP_CARVEOUT_MASK);
-    }
-    if (ret < 0) {
-        if (legacy_ion)
-            ret = ion_alloc(cmem_fd, size, 0, 1<< ION_HEAP_TYPE_CUSTOM, flag, &params->mIonHnd);
-        else
-            ret = CMEM_alloc_fd(size, params, flag, ION_HEAP_TYPE_CUSTOM);
+    __D("%s, cache=%d, bytes=%d, legacy_ion=%d, flag=0x%x\n",
+        __func__, cache_flag, size, legacy_ion, flag);
+
+    if (legacy_ion == 1) {
+        ret = ion_alloc(ion_fd, size, 0, 1 << ION_HEAP_TYPE_CUSTOM, flag,
+                                &params->mIonHnd);
+        if (ret < 0)
+        ret = ion_alloc(ion_fd, size, 0, ION_HEAP_TYPE_DMA_MASK, flag,
+                                &params->mIonHnd);
+        if (ret < 0)
+            ret = ion_alloc(ion_fd, size, 0, ION_HEAP_CARVEOUT_MASK, flag,
+                                &params->mIonHnd);
         if (ret < 0) {
-            __E("ion_alloc failed, errno=%d\n", errno);
+            __E("%s failed, errno=%d\n", __func__, errno);
             return -ENOMEM;
         }
-    } else {
-        __D("CMEM_alloc okay done!\n");
-    }
-    if (legacy_ion) {
-        ret = ion_share(cmem_fd, params->mIonHnd, &params->mImageFd);
+        ret = ion_share(ion_fd, params->mIonHnd, &params->mImageFd);
         if (ret < 0) {
             __E("ion_share failed, errno=%d\n", errno);
-            ion_free(cmem_fd, params->mIonHnd);
+            ion_free(ion_fd, params->mIonHnd);
             return -EINVAL;
         }
-        ion_free(cmem_fd, params->mIonHnd);
+        ion_free(ion_fd, params->mIonHnd);
+    } else {
+        ret = ion_mem_alloc_fd(ion_fd, size, params, flag,
+                                    ION_HEAP_TYPE_DMA_MASK);
+        if (ret < 0)
+            ret = ion_mem_alloc_fd(ion_fd, size, params, flag,
+                                        ION_HEAP_CARVEOUT_MASK);
+        if (ret < 0)
+                ret = ion_mem_alloc_fd(ion_fd, size, params, flag,
+                                            ION_HEAP_TYPE_CUSTOM);
+        if (ret < 0) {
+            __E("%s failed, errno=%d\n", __func__, errno);
+            return -ENOMEM;
+        }
     }
+
+    __D("%s okay done!, legacy_ion=%d\n", __func__, legacy_ion);
+    __D("%s, shared_fd=%d\n", __func__, params->mImageFd);
+
     return ret;
 }
 
-int CMEM_invalid_cache(int shared_fd)
+int ion_mem_invalid_cache(int ion_fd, int shared_fd)
 {
     int legacy_ion = 0;
 
-    legacy_ion = ion_is_legacy(cmem_fd);
+    legacy_ion = ion_is_legacy(ion_fd);
     if (!legacy_ion)
         return 0;
-    if (cmem_fd !=-1 && shared_fd != -1) {
-        if (ion_cache_invalid(cmem_fd, shared_fd)) {
-            __E("CMEM_invalid_cache err!\n");
+    if (ion_fd >= 0 && shared_fd >= 0) {
+        if (ion_cache_invalid(ion_fd, shared_fd)) {
+            __E("ion_mem_invalid_cache err!\n");
             return -1;
         }
     } else {
-        __E("CMEM_invalid_cache err!\n");
+        __E("ion_mem_invalid_cache err!\n");
         return -1;
     }
     return 0;
 }
 
-int CMEM_free(IONMEM_AllocParams *params)
+void ion_mem_exit(int ion_fd)
 {
-    int legacy_ion = 0;
+    int ret = -1;
 
-    if (!validate_init()) {
-        return -1;
+    __D("exit: %s, ion_fd=%d\n", __func__, ion_fd);
+
+    ret = ion_close(ion_fd);
+    if (ret < 0) {
+        __E("%s err (%s)! ion_fd=%d\n", strerror(errno), ion_fd);
+        return;
     }
-    __D("CMEM_free,mIonHnd=%x free\n", params->mIonHnd);
-    legacy_ion = ion_is_legacy(cmem_fd);
-    if (!legacy_ion)
-        return 0;
-    ion_free(cmem_fd, params->mIonHnd);
-
-    return 0;
-}
-
-
-int CMEM_exit(void)
-{
-    int result = 0;
-
-    __D("exit: entered - ref_count %d, cmem_fd %d\n", ref_count, cmem_fd);
-
-    if (!validate_init()) {
-        return -1;
-    }
-
-    __D("exit: decrementing ref_count\n");
-
-    ref_count--;
-    if (ref_count == 0) {
-        result = ion_close(cmem_fd);
-
-        __D("exit: ref_count == 0, closed /dev/ion (%s)\n",
-            result == -1 ? strerror(errno) : "succeeded");
-
-        /* setting -3 allows to distinguish CMEM exit from CMEM failed */
-        cmem_fd = -3;
-    }
-
-    __D("exit: exiting, returning %d\n", result);
-
-    return result;
 }
 

@@ -22,12 +22,10 @@ typedef struct IONMEM_AllocParams {
     unsigned char *usr_ptr;
 } IONMEM_AllocParams;
 
-int CMEM_init(void);
-unsigned long CMEM_alloc(size_t size, IONMEM_AllocParams *params, bool cache_flag);
-/*void* CMEM_getUsrPtr(unsigned long PhyAdr, int size);*/
-int CMEM_invalid_cache(int shared_fd);
-int CMEM_free(IONMEM_AllocParams *params);
-int CMEM_exit(void);
+int ion_mem_init(void);
+unsigned long ion_mem_alloc(int ion_fd, size_t size, IONMEM_AllocParams *params, bool cache_flag);
+int ion_mem_invalid_cache(int ion_fd, int shared_fd);
+void ion_mem_exit(int ion_fd);
 
 #if defined (__cplusplus)
 }

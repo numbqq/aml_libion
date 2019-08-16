@@ -39,13 +39,17 @@ int heap_mask = 1;
 int test = -1;
 size_t stride;
 
-int _CMEM_alloc_test(void)
+int _ionmem_alloc_test(void)
 {
-    int ret;
+    int ret, ion_fd = -1;
     IONMEM_AllocParams params;
 
-    CMEM_init();
-    ret = CMEM_alloc(len, &params, alloc_flags);
+    ion_fd = ion_mem_init();
+    if (ion_fd < 0) {
+        printf("ion_mem_init failed\n");
+        return ion_fd;
+    }
+    ret = ion_mem_alloc(ion_fd, len, &params, alloc_flags);
     if (ret)
         printf("%s failed: %s\n", __func__, strerror(ret));
     else
@@ -235,12 +239,12 @@ void ion_share_test()
 int main(int argc, char* argv[]) {
     int c;
     enum tests {
-        ALLOC_TEST = 0, MAP_TEST, SHARE_TEST, CMEM_TEST,
+        ALLOC_TEST = 0, MAP_TEST, SHARE_TEST, IONMEM_TEST,
     };
 
     while (1) {
         static struct option opts[] = {
-            {"CMEM_alloc", no_argument, 0, 'c'},
+            {"ion_mem_alloc", no_argument, 0, 'c'},
             {"alloc", no_argument, 0, 'a'},
             {"alloc_flags", required_argument, 0, 'f'},
             {"heap_mask", required_argument, 0, 'h'},
@@ -291,7 +295,7 @@ int main(int argc, char* argv[]) {
             test = SHARE_TEST;
             break;
         case 'c':
-            test = CMEM_TEST;
+            test = IONMEM_TEST;
             break;
         }
     }
@@ -308,8 +312,8 @@ int main(int argc, char* argv[]) {
         case SHARE_TEST:
             ion_share_test();
             break;
-        case CMEM_TEST:
-            _CMEM_alloc_test();
+        case IONMEM_TEST:
+            _ionmem_alloc_test();
             break;
         default:
             printf("must specify a test (alloc, map, share)\n");
