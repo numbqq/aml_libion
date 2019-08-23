@@ -98,18 +98,22 @@ unsigned long ion_mem_alloc(int ion_fd, size_t size, IONMEM_AllocParams *params,
         __func__, cache_flag, size, legacy_ion, flag);
 
     if (legacy_ion == 1) {
-        ret = ion_alloc(ion_fd, size, 0, 1 << ION_HEAP_TYPE_CUSTOM, flag,
+        if (!cache_flag) {
+            ret = ion_alloc(ion_fd, size, 0, ION_HEAP_TYPE_DMA_MASK, flag,
                                 &params->mIonHnd);
-        if (ret < 0)
-        ret = ion_alloc(ion_fd, size, 0, ION_HEAP_TYPE_DMA_MASK, flag,
+            if (ret < 0)
+                ret = ion_alloc(ion_fd, size, 0, ION_HEAP_CARVEOUT_MASK, flag,
                                 &params->mIonHnd);
-        if (ret < 0)
-            ret = ion_alloc(ion_fd, size, 0, ION_HEAP_CARVEOUT_MASK, flag,
-                                &params->mIonHnd);
-        if (ret < 0) {
-            __E("%s failed, errno=%d\n", __func__, errno);
-            return -ENOMEM;
         }
+        if (ret < 0) {
+            ret = ion_alloc(ion_fd, size, 0, 1 << ION_HEAP_TYPE_CUSTOM, flag,
+                                &params->mIonHnd);
+            if (ret < 0) {
+                __E("%s failed, errno=%d\n", __func__, errno);
+                return -ENOMEM;
+            }
+        }
+
         ret = ion_share(ion_fd, params->mIonHnd, &params->mImageFd);
         if (ret < 0) {
             __E("ion_share failed, errno=%d\n", errno);
