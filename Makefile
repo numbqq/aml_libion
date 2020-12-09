@@ -1,6 +1,12 @@
 #
 ## makefile for libion and iontest
 #
+
+export CROSS_COMPILE=aarch64-linux-gnu-
+#export CROSS_COMPILE=/opt/gcc-linaro-6.3.1-2017.02-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
+CC := $(CROSS_COMPILE)gcc
+
+
 LIBION_OBJ = ion.o IONmem.o
 CFLAGS += -I ./include/
 CFLAGS += -I ./kernel-headers/
@@ -24,5 +30,6 @@ $(IONTEST): $(IONTEST_OBJ) $(LIBION)
 	$(CC) $^ $(CFLAGS)  -o $@
 
 clean:
-	rm -f $(OBJ)
+	rm -rf $(OBJ)
+	rm -rf *.o
 
