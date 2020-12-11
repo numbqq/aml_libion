@@ -1,3 +1,4 @@
 iontest
 *.so
 *.o
+*.patch
